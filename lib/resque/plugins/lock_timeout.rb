@@ -300,7 +300,21 @@ module Resque
       def on_failure_lock(exception, *args)
         # In case of a DirtyExit, the ensure block of the around hook is not called
         if exception.is_a?(Resque::DirtyExit)
-          release_lock!(*args)
+          # Without a timeout, release unconditionally (lock cannot expire).
+          # With a timeout, re-read Redis and mirror around_perform_lock's
+          # ensure check: if the lock has expired, another worker may have
+          # re-acquired it — do not release.
+          if lock_timeout(*args) > 0
+            lock_until = lock_redis.get(redis_lock_key(*args))
+            now = Time.now.to_i
+            if lock_until && lock_until.to_i < now
+              lock_expired_before_release(*args)
+            else
+              release_lock!(*args)
+            end
+          else
+            release_lock!(*args)
+          end
         end
       end
     end

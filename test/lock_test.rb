@@ -79,6 +79,19 @@ class LockTest < Minitest::Test
     end
   end
 
+  def test_dirty_exit_does_not_release_expired_lock
+    now = Time.now.to_i
+    # Simulate a timed lock that expired before DirtyExit is handled.
+    Resque.redis.set(ExpireBeforeReleaseJob.redis_lock_key, now - 10)
+
+    ExpireBeforeReleaseJob.on_failure_lock(Resque::DirtyExit.new)
+
+    assert_equal true, $lock_expired, 'should be set by callback method'
+    assert_equal (now - 10).to_s,
+                 Resque.redis.get(ExpireBeforeReleaseJob.redis_lock_key),
+                 'expired lock should not be released on DirtyExit'
+  end
+
   def test_can_acquire_lock_with_timeout
     now = Time.now.to_i
     assert SlowWithTimeoutJob.acquire_lock!, 'acquire lock'
